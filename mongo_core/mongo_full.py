@@ -157,7 +157,136 @@ class Mongo(Integration):
 
         return result
 
+
+
     def parse_mongo_query(self, q):
+
+
+        def f_dict(instr):
+            return instr.replace("db[", "").replace("[", "").replace("]", "").replace("'", "").replace('"', '')
+
+
+        debug = self.debug
+        q = q.strip()
+        client_string = "c"
+        db_string = "db"
+        dot_split = q.split(".")
+        db_provided = None
+        col_provided = None
+        q_builder = {}
+
+        find_type = None
+
+        if q.find(".find(") >= 0:
+            find_type =  "find"
+        elif q.find(".find_one(") >= 0:
+            find_type = "find_one"
+        elif q.find(".count_documents") >= 0:
+            find_type = "count_documents"
+        if find_type is None:
+            print("Queries must contain find, find_one, or count_documents to be used with integrations")
+            return None
+        
+
+        if debug:
+            print("Full Query")
+            print(q)
+        find_split = q.split("." + find_type)
+
+        split_from = find_split[0]
+        split_where = find_split[1]
+
+        if debug:
+            print(f"From: {split_from}")
+            print(f"Where: {split_where}")
+
+
+        c_str = None
+        db_str = None
+        col_str = None
+        # Handle FROM
+
+        # First Check the dots
+        dot_split = split_from.split(".")
+
+        # 2 Dots
+        if len(dot_split) == 3:
+            c_str = dot_split[0]
+            db_str = dot_split[1]
+            if db_str.find(db_string + "[") == 0:
+                # c.db['dbname'].col
+                db_str = f_dict(db_str)
+            elif db_str == db_string:
+                #c.db.col
+                db_str = None
+            else:
+                #c.dbname.col
+                pass
+            col_str = dot_split[2]
+
+        # 1 Dot
+        elif len(dot_split) == 2:
+            if dot_split[0] == client_string:
+                c_str = dot_split[0]
+                if dot_split[1].find("[") < 0:
+                    # c.col
+                    col_str = dot_split[1]
+                else:
+                    sq_split = dot_split[1].split("[")
+                    if len(sq_split) == 3:
+                        # c.db['db']['col']
+                        db_str = f_dict(sq_split[1])
+                        col_str = f_dict(sq_split[2])
+                    else:
+                        print(f"FROM clause starting with c. must have db and collection specified like c.db['db_name']['col_name'] otherwise it's ambiguous")
+                        print(f"FROM: {split_from}")
+                        return None
+            elif dot_split[0] == db_string:
+                # db.col
+                col_str = dot_split[1]
+            elif dot_split[0].find(db_string + "[") == 0:
+                # db['db'].col
+                db_str = f_dict(dot_split[0])
+                col_str = dot_split[1]
+
+        # Too many Dots
+        elif len(dot_split) > 3:
+            print("Too many dots in FROM, not sure what to do")
+            print(f"FROM: {split_from}")
+            return None
+
+        # No Dots
+        else: # Our From had no dots, did they use []?
+            sq_split = dot_split[0].split("[")
+            if len(sq_split) == 3:
+                #db['db_name']['col']
+                db_str = f_dict(sq_split[1])
+                col_str = f_dict(sq_split[2])
+            else:
+                print(f"If there are no dots in the FROM clause, there must be exactly two square brackets in the from clause")
+                print(f"FROM: {split_from}")
+                return None
+        if debug:
+            print("From Parsing Complete")
+            print(f"FROM: {split_from}")
+            print(f"c_str: {c_str}")
+            print(f"db_str: {db_str}")
+            print(f"col_str: {col_str}")
+            
+        # Handle WHERE
+        # We've split on .find or .find_one
+        # Possibilities
+        # ().otherstuff()
+        # command
+        q_builder['find_type'] = find_type  # find or find_one
+        q_builder['db_str'] = db_str # dbname or None
+        q_builder['col_str'] = col_str # col Name
+        q_builder['q_command'] = split_where # Everything after find or find one (), (Query), ().limit(100)
+
+        return q_builder
+
+
+    def old_parse_mongo_query(self, q):
 
 
         debug = self.debug
@@ -170,7 +299,10 @@ class Mongo(Integration):
         db_provided = None
         col_provided = None
 
+        
+
         q_builder  = {}
+
 
 # Must have a Paren
         if q.find("(") < 0:
@@ -178,6 +310,7 @@ class Mongo(Integration):
             return None
 
         p_split = q.split("(")
+
         q_str = p_split[1][0:-1] # Remove the closing paren
         try: 
             q_dict = eval(q_str)
@@ -283,10 +416,10 @@ class Mongo(Integration):
         if q_dict is None:
             print(f"Query did not parse as a mongo find or find_one query - Not running")
             bRun = False
-
-        if q_dict['col_provided'] is None:
-            print("Query parsed, but we could not identify a collection to query in your query. Please see %%mongo for help")
-            bRun = False
+        else:
+            if q_dict['col_str'] is None:
+                print("Query parsed, but we could not identify a collection to query in your query. Please see %%mongo for help")
+                bRun = False
 
         return bRun
 
@@ -328,22 +461,50 @@ class Mongo(Integration):
         else: # Let's process this query
             q_dict = self.parse_mongo_query(query)
 
+     #   q_builder['find_type'] = find_type  # find or find_one
+     #   q_builder['db_str'] = db_str # dbname or None
+     #   q_builder['col_str'] = col_str # col Name
+     #   q_builder['q_command'] = split_where # Everything after find or find one (), (Query), ().limit(100)
+
+
+
             try:
-                if q_dict['q_type'] == 'find':
-                    if q_dict['db_provided'] is None:
-                        res_list = list(inst['cur_db'][q_dict['col_provided']].find(q_dict['q_dict']))
+
+                if q_dict['db_str'] is None:
+                    if inst['cur_db'] is None:
+                        status = f"Failure - DB not provided in query, and curdb not specified"
+                        mydf = None
+                        q_str = None
                     else:
-                        res_list = list(inst['session'][q_dict['db_provided']][q_dict['col_provided']].find(q_dict['q_dict']))
-                elif q_dict['q_type'] == 'find_one':
-                    if q_dict['db_provided'] is None:
-                        res_list = [inst['cur_db'][q_dict['col_provided']].find_one(q_dict['q_dict'])]
-                    else:
-                        res_list = [inst['session'][q_dict['db_provided']][q_dict['col_provided']].find_one(q_dict['q_dict'])]
+                        q_str = f"inst['cur_db']['{q_dict['col_str']}'].{q_dict['find_type']}{q_dict['q_command']}"
                 else:
-                    print("I have no idea how you got here. You get a gold star")
+                    q_str = f"inst['session']['{q_dict['db_str']}']['{q_dict['col_str']}'].{q_dict['find_type']}{q_dict['q_command']}"
+                if q_str is not None:
+                    if q_dict['find_type'] != 'count_documents':
+                        res_list = eval(f"list({q_str})")
+                    else:
+                        mycount = eval(q_str)
+                        res_list = [{"Record Count": mycount}]
+
             except Exception as e:
                 status = f"Failure - Mongo DB Error: {str(e)}"
                 mydf = None
+#            try:
+#                if q_dict['q_type'] == 'find':
+#                    if q_dict['db_provided'] is None:
+#                        res_list = list(inst['cur_db'][q_dict['col_provided']].find(q_dict['q_dict']))
+#                    else:
+#                        res_list = list(inst['session'][q_dict['db_provided']][q_dict['col_provided']].find(q_dict['q_dict']))
+#                elif q_dict['q_type'] == 'find_one':
+#                    if q_dict['db_provided'] is None:
+#                        res_list = [inst['cur_db'][q_dict['col_provided']].find_one(q_dict['q_dict'])]
+#                    else:
+#                        res_list = [inst['session'][q_dict['db_provided']][q_dict['col_provided']].find_one(q_dict['q_dict'])]
+#                else:
+#                    print("I have no idea how you got here. You get a gold star")
+#            except Exception as e:
+#                status = f"Failure - Mongo DB Error: {str(e)}"
+#                mydf = None
 
             if status == "":
                 try:
