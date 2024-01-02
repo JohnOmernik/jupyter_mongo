@@ -23,7 +23,7 @@ with open(pjoin(here, integration_str + "_core", "_version.py")) as f:
 
 setup_args = dict(
     name="jupyter_" + integration_str,
-    packages=[integration_str + "_core", "utils"],
+    packages=[integration_str + "_core", "mongo_utils"],
     version=version_ns["__version__"],
     description="""An Interface Jupyter Notebooks.""",
     long_description="A magic function for working with Mongo DBfor Python3 based Jupyter Notebooks",
