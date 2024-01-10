@@ -43,25 +43,55 @@ class Mongo(Integration):
     def retCustomDesc(self):
         return __desc__
 
-    def customHelp(self, curout):
-        n = self.name_str
-        mn = self.magic_name
-        m = "%" + mn
-        mq = "%" + m
-        table_header = "| Magic | Description |\n"
-        table_header += "| -------- | ----- |\n"
-        out = curout
-        qexamples = []
-        qexamples.append(["myinstance", "use mydb", "Use the database mydb. All items with db will refer to that db"])
-        qexamples.append(["myinstance", "curdb", "Show the current database that applies to db in your query"])
-        qexamples.append(["myinstance", "listdbs", "List the available Databases on the connection"])
-        qexamples.append(["myinstance", "show db", "This command is not mongo db, instead it shows the current db that \
-            applies to db in jupyter integrations"])
-        qexamples.append(["myinstance", "db[\"mycol\"].find({\"_id\":{\"$in\":[\"a\", \"b\", \"c\"]}}", "Fun a find \
-            command on the current db for the collection mycol"])
-        out += self.retQueryHelp(qexamples)
+    def customHelp(self, current_output):
+        out = current_output
+        out += self.retQueryHelp(None)
 
         return out
+
+    def retQueryHelp(self, q_examples=None):
+        # Our current customHelp function doesn't support a table for line magics
+        # (it's built in to integration_base.py) so I'm overriding it.
+
+        magic_name = self.magic_name
+        magic = f"%{magic_name}"
+
+        cell_magic_helper_text = (f"\n## Running {magic_name} cell magics\n"
+                                  "--------------------------------\n"
+                                  f"\n#### When running {magic} cell magics, {magic} and the instance name \
+                                      will be on the 1st of your cell, and then the command to run \
+                                      will be on the 2nd line of your cell.\n"
+                                  "\n### Cell magic examples\n"
+                                  "-----------------------\n")
+
+        cell_magic_table = ("| Cell Magic | Description |\n"
+                            "| ---------- | ----------- |\n"
+                            "| %%mongo instance<br>--help | Display usage syntax help for `%%mongo` cell magics |\n"
+                            "| %%mongo instance<br>find -args<br>{'your': query},{'your': filter} | Execute a `find()` \
+                                command against a MongoDB collection. Supports an optional filter. \
+                                **Don't wrap in quotes.** |\n"
+                            "| %%mongo instance<br>find_one -args<br>{'your': query},{'your': filter} | Get a single \
+                                document from a collection by executing a MongoDB `find_one()` command. Supports an \
+                                optional filter. **Don't wrap in quotes.** |\n"
+                            "| %%mongo instance<br>count_documents -args<br>{'your': query},{'your': filter} | Count \
+                                the number of documents in a collection by executing a MongoDB `count_documents()` \
+                                command. Supports an optional filter. **Don't wrap in quotes.** |\n")
+
+        line_magic_helper_text = (f"\n## Running {magic_name} line magics\n"
+                                  "-------------------------------\n"
+                                  f"\n#### To see a line magic's command syntax, type `%mongo --help`\n"
+                                  "\n### Line magic examples\n"
+                                  "-----------------------\n")
+
+        line_magic_table = ("| Line Magic | Description |\n"
+                            "| ---------- | ----------- |\n"
+                            "| %mongo --help | Display usage syntax help for `%mongo` line magics |\n"
+                            "| %mongo show_dbs -args | Show the databases in the instance you're connected to |\n"
+                            "| %mongo show_collections -args | Show the collections inside of a database")
+
+        help_out = cell_magic_helper_text + cell_magic_table + line_magic_helper_text + line_magic_table
+
+        return help_out
 
     def customAuth(self, instance):
         result = -1
