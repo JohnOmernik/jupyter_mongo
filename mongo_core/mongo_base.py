@@ -52,10 +52,9 @@ class Mongo(Magics):
             else:
                 if self.debug:
                     jiu.displayMD(f"**[ Dbg ]** Loading full {self.name_str} from base")
-                full_load = f"from {self.name_str}_core.{self.name_str}_full \
-                    import {self.name_str.capitalize()}\n{self.name_str}_full \
-                    = {self.name_str.capitalize()}(ipy, debug={str(self.debug)})\n \
-                    ipy.register_magics({self.name_str}_full)\n"
+                full_load = (f"from {self.name_str}_core.{self.name_str}_full import {self.name_str.capitalize()}\n"
+                             f"{self.name_str}_full = {self.name_str.capitalize()}(ipy, debug={str(self.debug)})\n"
+                             f"ipy.register_magics({self.name_str}_full)\n")
                 if self.debug:
                     jiu.displayMD("**[ Dbg ]** Load Code: {full_load}")
                 self.shell.ex(full_load)
