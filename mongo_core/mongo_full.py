@@ -68,7 +68,7 @@ class Mongo(Integration):
         inst = None
         if instance not in self.instances.keys():
             result = -3
-            print("Instance %s not found in instances - Connection Failed" % instance)
+            jiu.display_error("Instance %s not found in instances - Connection Failed" % instance)
         else:
             inst = self.instances[instance]
 
@@ -127,8 +127,8 @@ class Mongo(Integration):
             line_handled = self.handleLine(line)
 
             if self.debug:
-                print("line: %s" % line)
-                print("cell: %s" % cell)
+                jiu.displayMD(f"**[ Dbg ]** line: {line}")
+                jiu.displayMD(f"**[ Dbg ]** cell: {cell}")
 
             if not line_handled:  # We based on this we can do custom things for integrations.
                 try:

@@ -1,7 +1,6 @@
-#!/usr/bin/python
-
 from IPython.core.magic import (Magics, magics_class, line_cell_magic)
 from mongo_core._version import __desc__
+import jupyter_integrations_utility as jiu
 
 
 @magics_class
@@ -21,17 +20,17 @@ class Mongo(Magics):
         # Check namespace for integration and addon dicts
         if "jupyter_loaded_integrations" not in self.shell.user_ns:
             if self.debug:
-                print("jupyter_loaded_integrations not found in ns: adding")
+                jiu.displayMD("**[ Dbg ]** jupyter_loaded_integrations not found in ns: adding")
             self.shell.user_ns['jupyter_loaded_integrations'] = {}
         if "jupyter_loaded_addons" not in self.shell.user_ns:
             if self.debug:
-                print("jupyter_loaded_addons not found in ns: adding")
+                jiu.displayMD("**[ Dbg ]** jupyter_loaded_addons not found in ns: adding")
             self.shell.user_ns['jupyter_loaded_addons'] = {}
 
         # Check to see if our name_str is in loaded integrations (it shouldn't be)
         if self.name_str in self.shell.user_ns['jupyter_loaded_integrations']:
-            print(f"Potenital Multiverse collision of names: {self.name_str}")
-            print(self.shell.user_ns['jupyter_loaded_integrations'])
+            jiu.displayMD(f"**[ Dbg ]** Potenital Multiverse collision of names: {self.name_str}")
+            jiu.displayMD(f"**[ Dbg ]** {self.shell.user_ns['jupyter_loaded_integrations']}")
         else:
             # This is where add our base version
             self.shell.user_ns['jupyter_loaded_integrations'][self.name_str] = f"{self.name_str}_base"
@@ -45,20 +44,20 @@ class Mongo(Magics):
     @line_cell_magic
     def mongo(self, line, cell=None):
         if self.name_str not in self.shell.user_ns['jupyter_loaded_integrations']:
-            print(f"Somehow we got here and {self.name_str} is not in loaded integrations - Unpossible")
+            jiu.display_warning(f"Somehow we got here and {self.name_str} is not in loaded integrations - Unpossible")
         else:
             if self.shell.user_ns['jupyter_loaded_integrations'][self.name_str] != f"{self.name_str}_base":
-                print(f"We should only get here with a {self.name_str}_base state. \
+                jiu.display_warning(f"We should only get here with a {self.name_str}_base state. \
                     Currently for {self.name_str}: {self.shell.user_ns['jupyter_loaded_integrations'][self.name_str]}")
             else:
                 if self.debug:
-                    print(f"Loading full {self.name_str} from base")
+                    jiu.displayMD(f"**[ Dbg ]** Loading full {self.name_str} from base")
                 full_load = f"from {self.name_str}_core.{self.name_str}_full \
                     import {self.name_str.capitalize()}\n{self.name_str}_full \
                     = {self.name_str.capitalize()}(ipy, debug={str(self.debug)})\n \
                     ipy.register_magics({self.name_str}_full)\n"
                 if self.debug:
-                    print("Load Code: {full_load}")
+                    jiu.displayMD("**[ Dbg ]** Load Code: {full_load}")
                 self.shell.ex(full_load)
                 self.shell.user_ns['jupyter_loaded_integrations'][self.name_str] = f"{self.name_str}_full"
                 self.shell.run_cell_magic(self.name_str, line, cell)
