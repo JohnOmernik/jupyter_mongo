@@ -4,13 +4,23 @@ import pymongo
 class MongoAPI:
     """A class to perform pymongo calls to a Mongo instance."""
 
-    def __init__(self, host, port, username, password, timeout):
+    def __init__(self, host, port, username, password, serverSelectionTimeout, **kwargs):
+
+        authMechanism = kwargs.get("authMechanism") or "SCRAM-SHA-256"
+        authSource = kwargs.get("authSource") or "admin"
+
         self.session = pymongo.MongoClient(
             host=f"{host}:{port}",
             username=username,
             password=password,
-            serverSelectionTimeoutMS=timeout
+            serverSelectionTimeoutMS=serverSelectionTimeout,
+            authMechanism=authMechanism,
+            authSource=authSource
         )
+
+        print(serverSelectionTimeout)
+        print(authMechanism)
+        print(authSource)
 
     def _handler(self, command, **kwargs):
         """Broker Mongo commands"""

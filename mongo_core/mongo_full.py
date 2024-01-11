@@ -103,6 +103,8 @@ class Mongo(Integration):
             inst = self.instances[instance]
 
         if inst is not None:
+            print(inst)
+            print(inst["options"])
             inst["session"] = None
             mypass = ""
             if inst["enc_pass"] is not None:
@@ -111,11 +113,12 @@ class Mongo(Integration):
 
             try:
                 inst["session"] = MongoAPI(
-                    host=inst["host"],
-                    port=inst["port"],
-                    username=inst["user"],
-                    password=mypass,
-                    timeout=self.opts["server_selection_timeout"][0]
+                    inst["host"],
+                    inst["port"],
+                    inst["user"],
+                    mypass,
+                    self.opts["server_selection_timeout"][0],
+                    **inst["options"]
                 )
 
                 result = 0
