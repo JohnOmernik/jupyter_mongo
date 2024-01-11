@@ -18,10 +18,6 @@ class MongoAPI:
             authSource=authSource
         )
 
-        print(serverSelectionTimeout)
-        print(authMechanism)
-        print(authSource)
-
     def _handler(self, command, **kwargs):
         """Broker Mongo commands"""
         return getattr(self, command)(**kwargs)
