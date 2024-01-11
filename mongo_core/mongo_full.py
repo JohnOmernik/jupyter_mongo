@@ -103,8 +103,6 @@ class Mongo(Integration):
             inst = self.instances[instance]
 
         if inst is not None:
-            print(inst)
-            print(inst["options"])
             inst["session"] = None
             mypass = ""
             if inst["enc_pass"] is not None:
