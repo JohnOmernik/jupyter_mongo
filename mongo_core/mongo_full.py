@@ -1,548 +1,188 @@
-#!/usr/bin/python
-
-# Base imports for all integrations, only remove these at your own risk!
-import json
-import sys
-import os
-import time
 import pandas as pd
-from collections import OrderedDict
-import re
-from integration_core import Integration
-import datetime
-from IPython.core.magic import (Magics, magics_class, line_magic, cell_magic, line_cell_magic)
-from IPython.core.display import HTML
+from IPython.core.magic import (magics_class, line_cell_magic)
 from mongo_core._version import __desc__
-import urllib.parse
-
-
-# Your Specific integration imports go here, make sure they are in requirements!
-import pymongo
+from integration_core import Integration
 import jupyter_integrations_utility as jiu
-#import IPython.display
-from IPython.display import display_html, display, Javascript, FileLink, FileLinks, Image
-import ipywidgets as widgets
+from mongo_utils.mongo_api import MongoAPI
+from mongo_utils.user_input_parser import UserInputParser
+from mongo_utils.api_response_parser import ResponseParser
+
 
 @magics_class
 class Mongo(Integration):
     # Static Variables
     # The name of the integration
     name_str = "mongo"
-    instances = {} 
-    custom_evars = ['mongo_conn_default']
-    # These are the variables in the opts dict that allowed to be set by the user. These are specific to this custom integration and are joined
-    # with the base_allowed_set_opts from the integration base
+    instances = {}
+    custom_evars = ["mongo_conn_default", "server_selection_timeout"]
 
-    # These are the variables in the opts dict that allowed to be set by the user. These are specific to this custom integration and are joined
+    # These are the variables in the opts dict that allowed to be set by the user.
+    # These are specific to this custom integration and are joined
     # with the base_allowed_set_opts from the integration base
-    custom_allowed_set_opts = ["mongo_conn_default"]
-
+    custom_allowed_set_opts = ["mongo_conn_default", "server_selection_timeout"]
 
     myopts = {}
-    myopts['mongo_conn_default'] = ["default", "Default instance to connect with"]
-
-
-    instvars = ['noAuth', 'noPass', 'namedpw']
-
+    myopts["mongo_conn_default"] = ["default", "Default instance to connect with"]
+    myopts["server_selection_timeout"] = [5, "Time (in seconds) to wait while attempting to connect to an instance"]
+    instvars = ["noAuth", "noPass", "namedpw"]
 
     # Class Init function - Obtain a reference to the get_ipython()
     def __init__(self, shell, debug=False, *args, **kwargs):
         super(Mongo, self).__init__(shell, debug=debug)
         self.debug = debug
 
-        #Add local variables to opts dict
+        # Add local variables to opts dict
         for k in self.myopts.keys():
             self.opts[k] = self.myopts[k]
 
+        self.user_input_parser = UserInputParser()
+        self.response_parser = ResponseParser()
         self.load_env(self.custom_evars)
         self.parse_instances()
-
 
     def retCustomDesc(self):
         return __desc__
 
-
-
-# Handle no Auth situations for Testing
-    def req_password(self, instance):
-
-        noAuth = self.instances[instance]['options'].get('noAuth', 0)
-        noPass = self.instances[instance]['options'].get('noPass', 0)
-        if int(noAuth) == 1 or int(noPass) == 1:
-            bPass = False
-        else:
-            bPass = True
-        return bPass
-
-    def req_username(self, instance):
-        noAuth = self.instances[instance]['options'].get('noAuth', 0)
-        if int(noAuth) == 1:
-            bUser = False
-        else:
-            bUser = True
-        return bUser
-
-    def customHelp(self, curout):
-        n = self.name_str
-        mn = self.magic_name
-        m = "%" + mn
-        mq = "%" + m
-        table_header = "| Magic | Description |\n"
-        table_header += "| -------- | ----- |\n"
-        out = curout
-        qexamples = []
-        qexamples.append(["myinstance", "use mydb", "Use the database mydb. All items with db will refer to that db"])
-        qexamples.append(["myinstance", "curdb", "Show the current database that applies to db in your query"])
-        qexamples.append(["myinstance", "listdbs", "List the available Databases on the connection"])
-        qexamples.append(["myinstance", "show db", "This command is not mongo db, instead it shows the current db that applies to db in jupyter integrations"])
-        qexamples.append(["myinstance", "db['mycol'].find({'_id':{'$in':['a', 'b', 'c']}}", "Fun a find command on the current db for the collection mycol"])
-        out += self.retQueryHelp(qexamples)
+    def customHelp(self, current_output):
+        out = current_output
+        out += self.retQueryHelp(None)
 
         return out
+
+    def retQueryHelp(self, q_examples=None):
+        # Our current customHelp function doesn't support a table for line magics
+        # (it's built in to integration_base.py) so I'm overriding it.
+
+        magic_name = self.magic_name
+        magic = f"%{magic_name}"
+
+        cell_magic_helper_text = (f"\n## Running {magic_name} cell magics\n"
+                                  "--------------------------------\n"
+                                  f"\n#### When running {magic} cell magics, {magic} and the instance name \
+                                      will be on the 1st of your cell, and then the command to run \
+                                      will be on the 2nd line of your cell.\n"
+                                  "\n### Cell magic examples\n"
+                                  "-----------------------\n")
+
+        cell_magic_table = ("| Cell Magic | Description |\n"
+                            "| ---------- | ----------- |\n"
+                            "| %%mongo instance<br>--help | Display usage syntax help for `%%mongo` cell magics |\n"
+                            "| %%mongo instance<br>find -args<br>{'your': query},{'your': filter} | Execute a `find()` \
+                                command against a MongoDB collection. Supports an optional filter. \
+                                **Don't wrap in quotes.** |\n"
+                            "| %%mongo instance<br>find_one -args<br>{'your': query},{'your': filter} | Get a single \
+                                document from a collection by executing a MongoDB `find_one()` command. Supports an \
+                                optional filter. **Don't wrap in quotes.** |\n"
+                            "| %%mongo instance<br>count_documents -args<br>{'your': query},{'your': filter} | Count \
+                                the number of documents in a collection by executing a MongoDB `count_documents()` \
+                                command. Supports an optional filter. **Don't wrap in quotes.** |\n")
+
+        line_magic_helper_text = (f"\n## Running {magic_name} line magics\n"
+                                  "-------------------------------\n"
+                                  f"\n#### To see a line magic's command syntax, type `%mongo --help`\n"
+                                  "\n### Line magic examples\n"
+                                  "-----------------------\n")
+
+        line_magic_table = ("| Line Magic | Description |\n"
+                            "| ---------- | ----------- |\n"
+                            "| %mongo --help | Display usage syntax help for `%mongo` line magics |\n"
+                            "| %mongo show_dbs -args | Show the databases in the instance you're connected to |\n"
+                            "| %mongo show_collections -args | Show the collections inside of a database")
+
+        help_out = cell_magic_helper_text + cell_magic_table + line_magic_helper_text + line_magic_table
+
+        return help_out
 
     def customAuth(self, instance):
         result = -1
         inst = None
         if instance not in self.instances.keys():
             result = -3
-            print("Instance %s not found in instances - Connection Failed" % instance)
+            jiu.display_error("Instance %s not found in instances - Connection Failed" % instance)
         else:
             inst = self.instances[instance]
-        if inst is not None:
-            inst['session'] = None
-            mypass = ""
-            if self.req_password(instance) and inst['enc_pass'] is not None:
-                mypass = self.ret_dec_pass(inst['enc_pass'])
-                inst['connect_pass'] = ""
 
-            if self.req_username(instance):
-                myuser = urllib.parse.quote_plus(inst['user'])
-                if self.req_password(instance):
-                    urlpass = urllib.parse.quote_plus(mypass)
-                    upstr = f"{myuser}:{urlpass}"
-                else:
-                    upstr = f"{myuser}"
-                upstr += "@"
-            else:
-                upstr = ""
-            con_url = f"{inst['scheme']}://{upstr}{inst['host']}"
+        if inst is not None:
+            inst["session"] = None
+            mypass = ""
+            if inst["enc_pass"] is not None:
+                mypass = self.ret_dec_pass(inst["enc_pass"])
+                inst["connect_pass"] = ""
+
             try:
-                # Get Client into session
-                inst['session'] = pymongo.MongoClient(con_url)
-                # Get the DB list and push into dictionary 
-                inst['db_list'] = {}
-                all_dbs = [x['name'] for x in list(inst['session'].list_databases())]
-                for db in all_dbs:
-                    inst['db_list'][db] = []
-                # Determine if there is a default db provided or use "local"
-                inst['def_db'] = inst['options'].get('def_db', 'local')
-                # If the Default DB is in the Database list, get the collection list and set the cur_db to be the Database Object 
-                if inst['def_db'] in inst['db_list']:
-                    inst['use_cmd'] = f"use {inst['def_db']}"
-                    inst['cur_db'] = inst['session'][inst['def_db']]
-                    inst['db_list'][inst['def_db']] = inst['cur_db'].list_collection_names()
-                else:
-                    print(f"Warning: {inst['def_db']} not in db_list - Not setting db")
-                    inst['use_cmd'] = ""
-                    inst['cur_db'] = None
+                inst["session"] = MongoAPI(
+                    host=inst["host"],
+                    port=inst["port"],
+                    username=inst["user"],
+                    password=mypass,
+                    timeout=self.opts["server_selection_timeout"][0]
+                )
+
                 result = 0
+
             except Exception as e:
-                if str(e).find("'codeName': 'Unauthorized'") >= 0:
-                    print("Error with authentication")
-                    print(str(e))
-                    result = -2
-                else:
-                    print(f"Error Connecing: {str(e)}")
-                    result = -3
+                jiu.display_error(e)
+                result = -2
 
         return result
 
-
-
-    def parse_mongo_query(self, q):
-
-
-        def f_dict(instr):
-            return instr.replace("db[", "").replace("[", "").replace("]", "").replace("'", "").replace('"', '')
-
-
-        debug = self.debug
-        q = q.strip()
-        client_string = "c"
-        db_string = "db"
-        dot_split = q.split(".")
-        db_provided = None
-        col_provided = None
-        q_builder = {}
-
-        find_type = None
-
-        if q.find(".find(") >= 0:
-            find_type =  "find"
-        elif q.find(".find_one(") >= 0:
-            find_type = "find_one"
-        elif q.find(".count_documents") >= 0:
-            find_type = "count_documents"
-        if find_type is None:
-            print("Queries must contain find, find_one, or count_documents to be used with integrations")
-            return None
-        
-
-        if debug:
-            print("Full Query")
-            print(q)
-        find_split = q.split("." + find_type)
-
-        split_from = find_split[0]
-        split_where = find_split[1]
-
-        if debug:
-            print(f"From: {split_from}")
-            print(f"Where: {split_where}")
-
-
-        c_str = None
-        db_str = None
-        col_str = None
-        # Handle FROM
-
-        # First Check the dots
-        dot_split = split_from.split(".")
-
-        # 2 Dots
-        if len(dot_split) == 3:
-            c_str = dot_split[0]
-            db_str = dot_split[1]
-            if db_str.find(db_string + "[") == 0:
-                # c.db['dbname'].col
-                db_str = f_dict(db_str)
-            elif db_str == db_string:
-                #c.db.col
-                db_str = None
-            else:
-                #c.dbname.col
-                pass
-            col_str = dot_split[2]
-
-        # 1 Dot
-        elif len(dot_split) == 2:
-            if dot_split[0] == client_string:
-                c_str = dot_split[0]
-                if dot_split[1].find("[") < 0:
-                    # c.col
-                    col_str = dot_split[1]
-                else:
-                    sq_split = dot_split[1].split("[")
-                    if len(sq_split) == 3:
-                        # c.db['db']['col']
-                        db_str = f_dict(sq_split[1])
-                        col_str = f_dict(sq_split[2])
-                    else:
-                        print(f"FROM clause starting with c. must have db and collection specified like c.db['db_name']['col_name'] otherwise it's ambiguous")
-                        print(f"FROM: {split_from}")
-                        return None
-            elif dot_split[0] == db_string:
-                # db.col
-                col_str = dot_split[1]
-            elif dot_split[0].find(db_string + "[") == 0:
-                # db['db'].col
-                db_str = f_dict(dot_split[0])
-                col_str = dot_split[1]
-
-        # Too many Dots
-        elif len(dot_split) > 3:
-            print("Too many dots in FROM, not sure what to do")
-            print(f"FROM: {split_from}")
-            return None
-
-        # No Dots
-        else: # Our From had no dots, did they use []?
-            sq_split = dot_split[0].split("[")
-            if len(sq_split) == 3:
-                #db['db_name']['col']
-                db_str = f_dict(sq_split[1])
-                col_str = f_dict(sq_split[2])
-            else:
-                print(f"If there are no dots in the FROM clause, there must be exactly two square brackets in the from clause")
-                print(f"FROM: {split_from}")
-                return None
-        if debug:
-            print("From Parsing Complete")
-            print(f"FROM: {split_from}")
-            print(f"c_str: {c_str}")
-            print(f"db_str: {db_str}")
-            print(f"col_str: {col_str}")
-            
-        # Handle WHERE
-        # We've split on .find or .find_one
-        # Possibilities
-        # ().otherstuff()
-        # command
-        q_builder['find_type'] = find_type  # find or find_one
-        q_builder['db_str'] = db_str # dbname or None
-        q_builder['col_str'] = col_str # col Name
-        q_builder['q_command'] = split_where # Everything after find or find one (), (Query), ().limit(100)
-
-        return q_builder
-
-
-    def old_parse_mongo_query(self, q):
-
-
-        debug = self.debug
-
-        q = q.strip()
-        client_str = "c"
-        db_str = "db"
-        dot_split = q.strip().split(".")
-
-        db_provided = None
-        col_provided = None
-
-        
-
-        q_builder  = {}
-
-
-# Must have a Paren
-        if q.find("(") < 0:
-            print("Query must have a parentheses in it to denote what you are querying: Example db['mycol'].find({})")
-            return None
-
-        p_split = q.split("(")
-
-        q_str = p_split[1][0:-1] # Remove the closing paren
-        try: 
-            q_dict = eval(q_str)
-        except:
-            print(f"Could not evaluate Query: {q_str}")
-            return None
-        q_builder['q_str'] = q_str
-        q_builder['q_dict'] = q_dict
-
-        full_str = p_split[0]
-        full_split = full_str.split(".")
-        if debug:
-            print(f"full_str: {full_str}")
-            print(f"full_split: {full_split}")
-        f_str = full_split[-1].lower().strip()
-# The command (the last item in the str) must be find or find_one
-        if f_str not in ['find', 'find_one']:
-            print("Command for Magic use must be find or find one see %%mongo help for examples")
-            return None
-
-        q_builder['q_type'] = f_str
-        if debug:
-            print(f"p_split[0]: {p_split[0]}")
-# Ok, remove .find or .find_one now we have client, db, collection stuff
-        col_str = p_split[0].strip().replace(".find_one", "").replace(".find", "")
-# Split by .
-        col_split = col_str.split(".")
-
-# If there are no dots (len of 1)
-# it could be
-# c['db']['col']
-# db['col']
-        if debug:
-            print(f"Col Str: {col_str}")
-            print(f"Col split: {col_split}")
-            print(f"Len Col Split: {len(col_split)}")
-        if len(col_split) == 1:
-            if col_split[0].find(f"{client_str}") == 0:
-                sq_split = col_split[0].split("][")
-                if debug:
-                    print(f"sq split: {sq_split}")
-                if len(sq_split) == 2:
-                    db_provided = sq_split[0].replace("c[", "").replace("'", "").replace('"', '')
-                    col_provided = sq_split[1].replace("]", "").replace("'", "").replace('"', '')
-            elif col_split[0].find(f"{db_str}") == 0:
-                if col_split[0].strip().find("[") >= 0:
-                    col_provided = col_split[0].strip().replace("db[", "").replace("]", "").replace("'", "").replace('"', '')
-
-# IF there are two items, it could
-# c.db (No db or col provided)
-# c.db['col']
-# c['db'].col
-# db.col
-        elif len(col_split) == 2:
-            if col_split[0].strip() == client_str and col_split[1].strip() == db_str:
-                pass
-            elif col_split[0].strip() == client_str and col_split[1].strip() != db_str:
-                if col_split[1].find(f"{db_str}") == 0:
-                    if col_split[1].find("[") >= 0:
-                        col_provided = col_split[1].replace("db[", "").replace("]", "").replace("'", "").replace('"', '')
-            elif col_split[0].find(f"{client_str}") == 0:
-                if col_split[0].find("[") >= 0:
-                    db_provided = col_split[0].replace("c[", "").replace("]", "").replace("'", "").replace('"', '')
-                    col_provided = col_split[1].strip()
-            elif col_split[0].strip() == db_str:
-                col_provided = col_split[1].strip()
-
-# If there are 3 items
-# c.db.col
-# c.db1.col1
-        elif len(col_split) == 3:
-            if col_split[0].strip() == client_str and col_split[1].strip() == db_str:
-                col_provided = col_split[2].strip()
-            if col_split[0].strip() == client_str and col_split[1].strip() != db_str:
-                db_provided = col_split[1].strip()
-                col_provided = col_split[2].strip()
-
-        else:
-            pass
-
-        q_builder['db_provided'] = db_provided
-        q_builder['col_provided'] = col_provided
-        return q_builder
-
-
-
-    def validateQuery(self, query, instance):
-        bRun = True
-        bReRun = False
-
-
-        query = query.strip()
-
-        space_split = query.split(" ")
-        if space_split[0] in ['use', 'curdb', 'listdbs']:
-            return True
-
-        q_dict = self.parse_mongo_query(query)
-        if self.instances[instance]['last_query'] == query:
-            # If the validation allows rerun, that we are here:
-            bReRun = True
-
-        if q_dict is None:
-            print(f"Query did not parse as a mongo find or find_one query - Not running")
-            bRun = False
-        else:
-            if q_dict['col_str'] is None:
-                print("Query parsed, but we could not identify a collection to query in your query. Please see %%mongo for help")
-                bRun = False
-
-        return bRun
-
     def customQuery(self, query, instance, reconnect=True):
-
-        mydf = None
+        dataframe = None
         status = ""
 
-        inst = self.instances[instance]
+        try:
+            parsed_input = self.user_input_parser.parse_input(query, type="cell")
 
-        if self.debug:
-            print(f"Instance: {instance}")
-            print(f"Query: {query}")
+            if self.debug:
+                jiu.displayMD(f"**[ Dbg ]** parsed_input\n{parsed_input}")
 
-        if query.strip().find("use") == 0:
-            mydb = query.replace("use", "").strip()
-            if mydb in inst['db_list']:
-                inst['use_cmd'] = query.strip()
-                inst['cur_db'] = inst['session'][mydb]
-                inst['db_list'][mydb] = inst['cur_db'].list_collection_names()
-                print(f"Changed current db (db) to {mydb}")
-                status = "Success - No Results"
-            else:
-                print(f"{mydb} is not in current db list")
-                print(f"To see current db:\n")
-                print(f"%%mongo {instance}\ncurdb\n\n")
-                print(f"To see list of dbs:\n")
-                print(f"%%mongo {instance}\nlistdbs\n")
-                status = "Failure - DB Does not Exist"
-        elif query.strip() == "curdb":
-            print(f"Current db is {inst['use_cmd'].replace('use', '').strip()}\n")
-            status = "Success - No Results"
-        elif query.strip() == "listdbs":
-            print("List of DBs available on connection:")
-            for x in inst['db_list']:
-                print(x)
-            print("\n")
-            status = "Success - No Results"
-        else: # Let's process this query
-            q_dict = self.parse_mongo_query(query)
+            response = self.instances[instance]["session"]._handler(**parsed_input["input"])
 
-     #   q_builder['find_type'] = find_type  # find or find_one
-     #   q_builder['db_str'] = db_str # dbname or None
-     #   q_builder['col_str'] = col_str # col Name
-     #   q_builder['q_command'] = split_where # Everything after find or find one (), (Query), ().limit(100)
+            parsed_response = self.response_parser._handler(response, **parsed_input["input"])
 
+            dataframe = pd.DataFrame(parsed_response)
 
+        except Exception as e:
+            dataframe = None
+            status = str(e)
 
-            try:
-
-                if q_dict['db_str'] is None:
-                    if inst['cur_db'] is None:
-                        status = f"Failure - DB not provided in query, and curdb not specified"
-                        mydf = None
-                        q_str = None
-                    else:
-                        q_str = f"inst['cur_db']['{q_dict['col_str']}'].{q_dict['find_type']}{q_dict['q_command']}"
-                else:
-                    q_str = f"inst['session']['{q_dict['db_str']}']['{q_dict['col_str']}'].{q_dict['find_type']}{q_dict['q_command']}"
-                if q_str is not None:
-                    if q_dict['find_type'] != 'count_documents':
-                        res_list = eval(f"list({q_str})")
-                    else:
-                        mycount = eval(q_str)
-                        res_list = [{"Record Count": mycount}]
-
-            except Exception as e:
-                status = f"Failure - Mongo DB Error: {str(e)}"
-                mydf = None
-#            try:
-#                if q_dict['q_type'] == 'find':
-#                    if q_dict['db_provided'] is None:
-#                        res_list = list(inst['cur_db'][q_dict['col_provided']].find(q_dict['q_dict']))
-#                    else:
-#                        res_list = list(inst['session'][q_dict['db_provided']][q_dict['col_provided']].find(q_dict['q_dict']))
-#                elif q_dict['q_type'] == 'find_one':
-#                    if q_dict['db_provided'] is None:
-#                        res_list = [inst['cur_db'][q_dict['col_provided']].find_one(q_dict['q_dict'])]
-#                    else:
-#                        res_list = [inst['session'][q_dict['db_provided']][q_dict['col_provided']].find_one(q_dict['q_dict'])]
-#                else:
-#                    print("I have no idea how you got here. You get a gold star")
-#            except Exception as e:
-#                status = f"Failure - Mongo DB Error: {str(e)}"
-#                mydf = None
-
-            if status == "":
-                try:
-                    if len(res_list) > 0:
-                        mydf = pd.DataFrame(res_list)
-                        status = "Success"
-                    else:
-                        mydf = None
-                        status = "Success - No Results"
-                except Exception as e:
-                    status = f"Failure - Mongo Parse Results Error: {str(e)}"
-                    mydf = None
-
-    
-        return mydf, status
-
-
-
-
-
-
-##########################
-
+        return dataframe, status
 
     # This is the magic name.
     @line_cell_magic
     def mongo(self, line, cell=None):
+
         if cell is None:
             line = line.replace("\r", "")
             line_handled = self.handleLine(line)
-            if self.debug:
-                print("line: %s" % line)
-                print("cell: %s" % cell)
-            if not line_handled: # We based on this we can do custom things for integrations. 
-                if line.lower() == "testintwin":
-                    print("You've found the custom testint winning line magic!")
-                else:
-                    print("I am sorry, I don't know what you want to do with your line magic, try just %" + self.name_str + " for help options")
-        else: # This is run is the cell is not none, thus it's a cell to process  - For us, that means a query
-            self.handleCell(cell, line)
 
+            if self.debug:
+                jiu.displayMD(f"**[ Dbg ]** line: {line}")
+                jiu.displayMD(f"**[ Dbg ]** cell: {cell}")
+
+            if not line_handled:  # We based on this we can do custom things for integrations.
+                try:
+                    parsed_input = self.user_input_parser.parse_input(line, type="line")
+
+                    if self.debug:
+                        jiu.displayMD(f"**[ Dbg ]** Parsed Query: `{parsed_input}`")
+
+                    if parsed_input["error"] is True:
+                        jiu.display_error(f"{parsed_input['message']}")
+
+                    else:
+                        instance = parsed_input["input"]["instance"]
+
+                        if instance not in self.instances.keys():
+                            jiu.display_error(f"Instance **{instance}** not found in instances")
+
+                        else:
+                            response = self.instances[instance]["session"]._handler(**parsed_input["input"])
+                            parsed_response = self.response_parser._handler(response, **parsed_input["input"])
+                            jiu.displayMD(parsed_response)
+
+                except Exception as e:
+                    jiu.display_error(f"There was an error in your line magic: {e}")
+
+        else:  # This is run is the cell is not none, thus it's a cell to process  - For us, that means a query
+            self.handleCell(cell, line)
