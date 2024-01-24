@@ -1,7 +1,8 @@
 from argparse import ArgumentParser
-from mongo_utils.mongo_api import MongoAPI
+import ast
 import json
 import re
+from mongo_utils.mongo_api import MongoAPI
 
 
 class UserInputParser(ArgumentParser):
@@ -79,10 +80,15 @@ class UserInputParser(ArgumentParser):
         Returns:
             split_query (str): a list
         """
-        split_query = re.split(r"(?<=\})\s{0,}\,\s{0,}(?=\{)", query)
-        split_query = list(map(lambda q: json.loads(q), split_query))
 
-        return split_query
+        try:
+            split_query = re.split(r"(?<=\})\s{0,}\,\s{0,}(?=\{)", query)
+            split_query = list(map(lambda q: ast.literal_eval(json.loads(json.dumps(q))), split_query))
+
+            return split_query
+
+        except Exception:
+            raise
 
     def parse_input(self, input, type):
         """Parses the user's line magic from Jupyter
@@ -153,5 +159,9 @@ class UserInputParser(ArgumentParser):
                 parsed_input["error"] = True
                 parsed_input["message"] = r"Invalid input received, see the output above. \
                     Try `%%mongo --help` or `%%mongo -h`"
+
+            except Exception as e:
+                parsed_input["error"] = True
+                parsed_input["message"] = f"Exception while parsing user input: {e}"
 
         return parsed_input
