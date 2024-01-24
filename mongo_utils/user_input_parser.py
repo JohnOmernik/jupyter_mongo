@@ -80,11 +80,10 @@ class UserInputParser(ArgumentParser):
         Returns:
             split_query (str): a list
         """
-        print(query)
-        print(type(query))
+
         try:
             split_query = re.split(r"(?<=\})\s{0,}\,\s{0,}(?=\{)", query)
-            split_query = list(map(lambda q: ast.literal_eval(json.dumps(q)), split_query))
+            split_query = list(map(lambda q: ast.literal_eval(json.loads(json.dumps(q))), split_query))
 
             return split_query
 
