@@ -67,15 +67,18 @@ class Mongo(Integration):
         cell_magic_table = ("| Cell Magic | Description |\n"
                             "| ---------- | ----------- |\n"
                             "| %%mongo instance<br>--help | Display usage syntax help for `%%mongo` cell magics |\n"
-                            "| %%mongo instance<br>find -args<br>{'your': query},{'your': filter} | Execute a `find()` \
-                                command against a MongoDB collection. Supports an optional filter. \
+                            "| %%mongo instance<br>command --help | Display usage syntax for a specific command |\n"
+                            "| %%mongo instance<br>find -i instance -d database -c collection<br>{'field': \
+                                {'eq': 'value'}} | Execute a `find()` command against a MongoDB collection. \
+                                    Supports an optional filter. **Don't wrap in quotes.** |\n"
+                            "| %%mongo instance<br>find_one -i instance -d database -c collection<br>{'field': \
+                                {'eq': 'value'}}  | Get a single document from a collection by executing a \
+                                MongoDB `find_one()` command. Supports an optional filter. \
                                 **Don't wrap in quotes.** |\n"
-                            "| %%mongo instance<br>find_one -args<br>{'your': query},{'your': filter} | Get a single \
-                                document from a collection by executing a MongoDB `find_one()` command. Supports an \
-                                optional filter. **Don't wrap in quotes.** |\n"
-                            "| %%mongo instance<br>count_documents -args<br>{'your': query},{'your': filter} | Count \
-                                the number of documents in a collection by executing a MongoDB `count_documents()` \
-                                command. Supports an optional filter. **Don't wrap in quotes.** |\n")
+                            "| %%mongo instance<br>count_documents -i instance -d database -c collection<br> \
+                                {'some': {'filter': 'here'} } | Count the number of documents in a collection \
+                                by executing a MongoDB `count_documents()` command. Supports an optional filter. \
+                                **Don't wrap in quotes.** |\n")
 
         line_magic_helper_text = (f"\n## Running {magic_name} line magics\n"
                                   "-------------------------------\n"
@@ -86,8 +89,10 @@ class Mongo(Integration):
         line_magic_table = ("| Line Magic | Description |\n"
                             "| ---------- | ----------- |\n"
                             "| %mongo --help | Display usage syntax help for `%mongo` line magics |\n"
-                            "| %mongo show_dbs -args | Show the databases in the instance you're connected to |\n"
-                            "| %mongo show_collections -args | Show the collections inside of a database")
+                            "| %mongo command --help | Display usage syntax for a specific command |\n"
+                            "| %mongo show_dbs -i instance | Show the databases in the instance you're connected to |\n"
+                            "| %mongo show_collections -i instance -d database | Show the collections \
+                                inside of a database |\n")
 
         help_out = cell_magic_helper_text + cell_magic_table + line_magic_helper_text + line_magic_table
 
