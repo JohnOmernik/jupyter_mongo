@@ -114,7 +114,7 @@ class UserInputParser(ArgumentParser):
                 if len(input.strip().split("\n")) > 1:
                     parsed_input["error"] = True
                     parsed_input["message"] = r"The line magic is more than one line and shouldn't be. \
-                        Try `%splunk --help` or `%splunk -h` for proper formatting"
+                        Try `%mongo --help` or `%mongo -h` for proper formatting"
 
                 else:
                     parsed_user_command = self.line_parser.parse_args(input.split())
