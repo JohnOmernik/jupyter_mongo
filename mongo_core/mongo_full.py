@@ -1,5 +1,6 @@
 import pandas as pd
 from IPython.core.magic import (magics_class, line_cell_magic)
+from pymongo.errors import OperationFailure, ConnectionFailure
 from mongo_core._version import __desc__
 from integration_core import Integration
 import jupyter_integrations_utility as jiu
@@ -124,7 +125,17 @@ class Mongo(Integration):
                     **inst["options"]
                 )
 
+                inst["session"].session.admin.command("ismaster")
+
                 result = 0
+
+            except OperationFailure as e:
+                if "Authentication failed" in str(e):
+                    jiu.display_error("Error: Authentication failed. Please check your username and password.")
+                else:
+                    jiu.display_error(f"An operation error occurred: {e}")
+            except ConnectionFailure as e:
+                jiu.display_error(f"Failed to connect to MongoDB. Error: {e}")
 
             except Exception as e:
                 jiu.display_error(e)
